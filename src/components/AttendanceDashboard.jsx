@@ -274,8 +274,28 @@ const toAllRows = (recs) => {
   let lastEmployee = '';
   
   recs.forEach((r, i) => {
-    // Add blank row if employee changes (except for first record)
+    // Add TWO blank rows if employee changes (except for first record)
     if (lastEmployee !== '' && lastEmployee !== r.name) {
+      // First blank row
+      rows.push({
+        '#': '',
+        Name: '',
+        Date: '',
+        Day: '',
+        'Time In': '',
+        'Time Out': '',
+        Department: '',
+        'OT(hrs)': '',
+        'Late/UT(hrs)': '',
+        'LWOP(days)': '',
+        'LWP(days)': '',
+        'RGOT(hrs)': '',
+        'RDOT(hrs)': '',
+        'Paid Holiday': '',
+        'Cutoff Adj.': '',
+        Remarks: ''
+      });
+      // Second blank row
       rows.push({
         '#': '',
         Name: '',
