@@ -1,9 +1,12 @@
-import{useState,useEffect,useRef,useCallback,useMemo}from 'react';
-import*as XLSX from 'xlsx';
-import{getAllFiles,uploadFile,getAttendanceByFile,deleteFile,deleteAllFiles,createRecord,updateRecord,deleteRecord}from '../services/api';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import * as XLSX from 'xlsx';
+import {
+  getAllFiles, uploadFile, getAttendanceByFile,
+  deleteFile, deleteAllFiles, createRecord, updateRecord, deleteRecord
+} from '../services/api';
 import deltaplusLogo from '../assets/deltaplus.png';
 
-const css=`
+const css = `
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
 :root{--bg:#f9f8f3;--bg-2:#ffffff;--bg-3:#f4f2eb;--bg-4:#edeadf;--bg-sidebar:#fffef9;--border:rgba(0,0,0,0.08);--border-2:rgba(0,0,0,0.14);--text-1:#1c1a16;--text-2:#5c5648;--text-3:#9e9585;--accent:#d4a017;--accent-2:#b8880f;--accent-3:#f5c842;--accent-glow:rgba(212,160,23,0.18);--accent-soft:rgba(212,160,23,0.09);--green:#1a9958;--amber:#c8820a;--red:#d43f3f;--teal:#0d9e8e;--violet:#7a50d2;--sky:#1880c2;--orange:#d2600a;--slate:#586e82;--r:12px;--rs:8px;--rl:16px;}
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
@@ -234,159 +237,235 @@ input[type="date"].fg-input:disabled,input[type="time"].fg-input:disabled{cursor
 `;
 
 /* ─── Constants ─── */
-const EMPTY_FORM={name:'',date:'',timeIn:'',timeOut:'',overtime:'',lateUndertime:'',remarks:'',employeeType:'',paidHoliday:'',lastCutoffAdjust:'',lwop:'',rgot:'',rdot:'',lwp:''};
-const DEPT_OPTIONS=[{value:'',label:'— Department —'},{value:'warehouse',label:'Warehouse'},{value:'office',label:'Office / Sales'},{value:'manager',label:'Manager'}];
-const KEY_MAP={days:null,ot:'overtime',late:'lateUndertime',lwop:'lwop',lwp:'lwp',rgot:'rgot',rdot:'rdot',holiday:'paidHoliday',cutoff:'lastCutoffAdjust'};
+const EMPTY_FORM = { name: '', date: '', timeIn: '', timeOut: '', overtime: '', lateUndertime: '', remarks: '', employeeType: '', paidHoliday: '', lastCutoffAdjust: '', lwop: '', rgot: '', rdot: '', lwp: '' };
+const DEPT_OPTIONS = [{ value: '', label: '— Department —' }, { value: 'warehouse', label: 'Warehouse' }, { value: 'office', label: 'Office / Sales' }, { value: 'manager', label: 'Manager' }];
+const KEY_MAP = { days: null, ot: 'overtime', late: 'lateUndertime', lwop: 'lwop', lwp: 'lwp', rgot: 'rgot', rdot: 'rdot', holiday: 'paidHoliday', cutoff: 'lastCutoffAdjust' };
 
 /* ─── Helpers ─── */
-const parseNum=v=>{const n=parseFloat(String(v||'').replace(/[^0-9.-]/g,''));return isNaN(n)?0:n;};
-const safeId=s=>(s||'').replace(/[^a-zA-Z0-9_-]/g,'_');
-const fmtTime=s=>{if(!s)return'—';const m=s.match(/(\d+):(\d+):\d+\s*(AM|PM)/i);return m?`${m[1]}:${m[2]} ${m[3].toUpperCase()}`:s;};
-const getDayOfWeek=d=>{if(!d)return'—';return['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(d).getDay()];};
-const getDayClass=d=>`day-${d.toLowerCase()}`;
-const toTimeInput=s=>{if(!s)return'';const m=s.match(/(\d+):(\d+):\d+\s*(AM|PM)/i);if(!m)return'';let h=+m[1];if(m[3].toUpperCase()==='PM'&&h!==12)h+=12;if(m[3].toUpperCase()==='AM'&&h===12)h=0;return`${String(h).padStart(2,'0')}:${m[2]}`;};
-const fromTimeInput=v=>{if(!v)return'';const[h,min]=v.split(':');let hr=+h;const p=hr>=12?'PM':'AM';let d=hr%12||12;return`${d}:${String(+min).padStart(2,'0')}:00 ${p}`;};
+const parseNum = v => { const n = parseFloat(String(v || '').replace(/[^0-9.-]/g, '')); return isNaN(n) ? 0 : n; };
+const safeId = s => (s || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+const fmtTime = s => { if (!s) return '—'; const m = s.match(/(\d+):(\d+):\d+\s*(AM|PM)/i); return m ? `${m[1]}:${m[2]} ${m[3].toUpperCase()}` : s; };
+const getDayOfWeek = d => { if (!d) return '—'; return ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][new Date(d).getDay()]; };
+const getDayClass = d => `day-${d.toLowerCase()}`;
+const toTimeInput = s => { if (!s) return ''; const m = s.match(/(\d+):(\d+):\d+\s*(AM|PM)/i); if (!m) return ''; let h = +m[1]; if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12; if (m[3].toUpperCase() === 'AM' && h === 12) h = 0; return `${String(h).padStart(2, '0')}:${m[2]}`; };
+const fromTimeInput = v => { if (!v) return ''; const [h, min] = v.split(':'); let hr = +h; const p = hr >= 12 ? 'PM' : 'AM'; let d = hr % 12 || 12; return `${d}:${String(+min).padStart(2, '0')}:00 ${p}`; };
 
 /* ─── Toast Hook ─── */
-let _tid=0;
-function useToasts(){
-  const[toasts,setToasts]=useState([]);
-  const push=useCallback((msg,type='info')=>{const id=++_tid;setToasts(p=>[...p,{id,msg,type}]);setTimeout(()=>setToasts(p=>p.filter(t=>t.id!==id)),3500);},[]);
-  const dismiss=useCallback(id=>setToasts(p=>p.filter(t=>t.id!==id)),[]);
-  return{toasts,push,dismiss};
+let _tid = 0;
+function useToasts() {
+  const [toasts, setToasts] = useState([]);
+  const push = useCallback((msg, type = 'info') => { const id = ++_tid; setToasts(p => [...p, { id, msg, type }]); setTimeout(() => setToasts(p => p.filter(t => t.id !== id)), 3500); }, []);
+  const dismiss = useCallback(id => setToasts(p => p.filter(t => t.id !== id)), []);
+  return { toasts, push, dismiss };
 }
 
 /* ─── Excel Export ─── */
-function exportXLSX(rows,filename,sheet='Sheet1'){const ws=XLSX.utils.json_to_sheet(rows);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,sheet);XLSX.writeFile(wb,filename);}
-const toAllRows=recs=>recs.map((r,i)=>({'#':i+1,Name:r.name||'',Date:r.date||'',Day:getDayOfWeek(r.date),'Time In':r.timeIn||'','Time Out':r.timeOut||'',Department:r.employeeType||'','OT(mins)':r.overtime||'','Late/UT(hrs)':r.lateUndertime||'','LWOP(days)':r.lwop||'','LWP(days)':r.lwp||'','RGOT(hrs)':r.rgot||'','RDOT(hrs)':r.rdot||'','Paid Holiday':r.paidHoliday||'','Cutoff Adj.':r.lastCutoffAdjust||'',Remarks:r.remarks||''}));
-const toSummaryRows=(names,recs)=>names.map(n=>{const r=recs.filter(x=>x.name===n);const s=k=>+r.reduce((a,x)=>a+parseNum(x[k]),0).toFixed(2);return{Name:n,Days:r.length,'OT(mins)':s('overtime'),'Late/UT(hrs)':s('lateUndertime'),LWOP:s('lwop'),LWP:s('lwp'),RGOT:s('rgot'),RDOT:s('rdot'),PaidHoliday:s('paidHoliday'),CutoffAdj:s('lastCutoffAdjust')};});
+function exportXLSX(rows, filename, sheet = 'Sheet1') { const ws = XLSX.utils.json_to_sheet(rows); const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, sheet); XLSX.writeFile(wb, filename); }
 
-/* ─── Icons ─── */
-const I={
-  File:    ()=><svg viewBox="0 0 16 16" fill="none"><rect x="3" y="1.5" width="10" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
-  Upload:  ()=><svg viewBox="0 0 16 16" fill="none"><path d="M8 10V3M5 6l3-3 3 3M3 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Plus:    ()=><svg viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
-  Trash:   ()=><svg viewBox="0 0 16 16" fill="none"><path d="M2.5 4h11M6 4V2.5h4V4M5 4l.75 9.5h4.5L11 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Eye:     ()=><svg viewBox="0 0 16 16" fill="none"><path d="M1.5 8C2.5 5 5 3 8 3s5.5 2 6.5 5c-1 3-3.5 5-6.5 5S2.5 11 1.5 8z" stroke="currentColor" strokeWidth="1.3"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3"/></svg>,
-  Edit:    ()=><svg viewBox="0 0 16 16" fill="none"><path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>,
-  X:       ()=><svg viewBox="0 0 16 16" fill="none"><path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
-  Search:  ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4"/><path d="M11 11l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
-  Chevron: ()=><svg viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Refresh: ()=><svg viewBox="0 0 16 16" fill="none"><path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.8 0 3.4.87 4.4 2.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M11 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Check:   ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5 8l2.2 2.2L11 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Alert:   ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
-  Info:    ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
-  Users:   ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.3"/><path d="M1.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="12" cy="5" r="2" stroke="currentColor" strokeWidth="1.2"/><path d="M14.5 13.5c0-2-1.5-3-3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
-  List:    ()=><svg viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
-  Back:    ()=><svg viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Clock:   ()=><svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
-  Cal:     ()=><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5 2v2M11 2v2M2 7h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
-  Trend:   ()=><svg viewBox="0 0 16 16" fill="none"><path d="M2 11l4-4 3 3 5-6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M11 4h3v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Download:()=><svg viewBox="0 0 16 16" fill="none"><path d="M8 3v7M5 8l3 3 3-3M3 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
-  Table:   ()=><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M2 6h12M6 6v8" stroke="currentColor" strokeWidth="1.3"/></svg>,
+// Clean number - remove "mins", "hrs", etc. and keep only number
+const cleanNumber = (val) => {
+  if (!val) return '';
+  const match = val.toString().match(/^([\d.]+)/);
+  return match ? match[1] : val;
 };
 
-const STAT_CARDS=[
-  {key:'days',   label:'Days',       unit:'',    color:'blue',  icon:<I.Cal/>},
-  {key:'ot',     label:'Overtime',   unit:'mins',color:'green', icon:<I.Trend/>},
-  {key:'late',   label:'Late / UT',  unit:'mins',color:'amber', icon:<I.Clock/>},
-  {key:'lwop',   label:'LWOP',       unit:'days',color:'red',   icon:<I.Clock/>},
-  {key:'lwp',    label:'LWP',        unit:'days',color:'slate', icon:<I.Cal/>},
-  {key:'rgot',   label:'RGOT',       unit:'hrs', color:'teal',  icon:<I.Trend/>},
-  {key:'rdot',   label:'RDOT',       unit:'hrs', color:'violet',icon:<I.Trend/>},
-  {key:'holiday',label:'Paid Hol.',  unit:'days',color:'sky',   icon:<I.Cal/>},
-  {key:'cutoff', label:'Cutoff Adj.',unit:'hrs', color:'orange',icon:<I.Clock/>},
+const toAllRows = (recs) => {
+  const rows = [];
+  let lastEmployee = '';
+  
+  recs.forEach((r, i) => {
+    // Add blank row if employee changes (except for first record)
+    if (lastEmployee !== '' && lastEmployee !== r.name) {
+      rows.push({
+        '#': '',
+        Name: '',
+        Date: '',
+        Day: '',
+        'Time In': '',
+        'Time Out': '',
+        Department: '',
+        'OT(hrs)': '',
+        'Late/UT(hrs)': '',
+        'LWOP(days)': '',
+        'LWP(days)': '',
+        'RGOT(hrs)': '',
+        'RDOT(hrs)': '',
+        'Paid Holiday': '',
+        'Cutoff Adj.': '',
+        Remarks: ''
+      });
+    }
+    
+    rows.push({
+      '#': i + 1,
+      Name: r.name || '',
+      Date: r.date || '',
+      Day: getDayOfWeek(r.date),
+      'Time In': r.timeIn || '',
+      'Time Out': r.timeOut || '',
+      Department: r.employeeType || '',
+      'OT(hrs)': cleanNumber(r.overtime),
+      'Late/UT(hrs)': cleanNumber(r.lateUndertime),
+      'LWOP(days)': cleanNumber(r.lwop),
+      'LWP(days)': cleanNumber(r.lwp),
+      'RGOT(hrs)': cleanNumber(r.rgot),
+      'RDOT(hrs)': cleanNumber(r.rdot),
+      'Paid Holiday': cleanNumber(r.paidHoliday),
+      'Cutoff Adj.': cleanNumber(r.lastCutoffAdjust),
+      Remarks: r.remarks || ''
+    });
+    
+    lastEmployee = r.name;
+  });
+  
+  return rows;
+};
+
+const toSummaryRows = (names, recs) => {
+  return names.map(n => {
+    const r = recs.filter(x => x.name === n);
+    const s = k => +r.reduce((a, x) => a + parseNum(x[k]), 0).toFixed(2);
+    return {
+      Name: n,
+      Days: r.length,
+      'OT(hrs)': cleanNumber(s('overtime')),
+      'Late/UT(hrs)': cleanNumber(s('lateUndertime')),
+      LWOP: cleanNumber(s('lwop')),
+      LWP: cleanNumber(s('lwp')),
+      RGOT: cleanNumber(s('rgot')),
+      RDOT: cleanNumber(s('rdot')),
+      PaidHoliday: cleanNumber(s('paidHoliday')),
+      CutoffAdj: cleanNumber(s('lastCutoffAdjust'))
+    };
+  });
+};
+
+/* ─── Icons ─── */
+const I = {
+  File: () => <svg viewBox="0 0 16 16" fill="none"><rect x="3" y="1.5" width="10" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5.5 5.5h5M5.5 8h5M5.5 10.5h3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+  Upload: () => <svg viewBox="0 0 16 16" fill="none"><path d="M8 10V3M5 6l3-3 3 3M3 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Plus: () => <svg viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  Trash: () => <svg viewBox="0 0 16 16" fill="none"><path d="M2.5 4h11M6 4V2.5h4V4M5 4l.75 9.5h4.5L11 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Eye: () => <svg viewBox="0 0 16 16" fill="none"><path d="M1.5 8C2.5 5 5 3 8 3s5.5 2 6.5 5c-1 3-3.5 5-6.5 5S2.5 11 1.5 8z" stroke="currentColor" strokeWidth="1.3"/><circle cx="8" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3"/></svg>,
+  Edit: () => <svg viewBox="0 0 16 16" fill="none"><path d="M11 2.5l2.5 2.5L5 13.5H2.5V11L11 2.5z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/></svg>,
+  X: () => <svg viewBox="0 0 16 16" fill="none"><path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>,
+  Search: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.4"/><path d="M11 11l2.5 2.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  Chevron: () => <svg viewBox="0 0 16 16" fill="none"><path d="M6 3l5 5-5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Refresh: () => <svg viewBox="0 0 16 16" fill="none"><path d="M13.5 8A5.5 5.5 0 1 1 8 2.5c1.8 0 3.4.87 4.4 2.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/><path d="M11 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Check: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5 8l2.2 2.2L11 6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Alert: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 5v3.5M8 10.5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  Info: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 7v4M8 5v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  Users: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.3"/><path d="M1.5 13.5c0-2.5 2-4 4.5-4s4.5 1.5 4.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="12" cy="5" r="2" stroke="currentColor" strokeWidth="1.2"/><path d="M14.5 13.5c0-2-1.5-3-3-3" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>,
+  List: () => <svg viewBox="0 0 16 16" fill="none"><path d="M3 4h10M3 8h10M3 12h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>,
+  Back: () => <svg viewBox="0 0 16 16" fill="none"><path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Clock: () => <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3"/><path d="M8 5v3.5l2 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+  Cal: () => <svg viewBox="0 0 16 16" fill="none"><rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M5 2v2M11 2v2M2 7h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>,
+  Trend: () => <svg viewBox="0 0 16 16" fill="none"><path d="M2 11l4-4 3 3 5-6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/><path d="M11 4h3v3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Download: () => <svg viewBox="0 0 16 16" fill="none"><path d="M8 3v7M5 8l3 3 3-3M3 13h10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>,
+  Table: () => <svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M2 6h12M6 6v8" stroke="currentColor" strokeWidth="1.3"/></svg>,
+};
+
+const STAT_CARDS = [
+  { key: 'days', label: 'Days', unit: '', color: 'blue', icon: <I.Cal /> },
+  { key: 'ot', label: 'Overtime', unit: 'mins', color: 'green', icon: <I.Trend /> },
+  { key: 'late', label: 'Late / UT', unit: 'mins', color: 'amber', icon: <I.Clock /> },
+  { key: 'lwop', label: 'LWOP', unit: 'days', color: 'red', icon: <I.Clock /> },
+  { key: 'lwp', label: 'LWP', unit: 'days', color: 'slate', icon: <I.Cal /> },
+  { key: 'rgot', label: 'RGOT', unit: 'hrs', color: 'teal', icon: <I.Trend /> },
+  { key: 'rdot', label: 'RDOT', unit: 'hrs', color: 'violet', icon: <I.Trend /> },
+  { key: 'holiday', label: 'Paid Hol.', unit: 'days', color: 'sky', icon: <I.Cal /> },
+  { key: 'cutoff', label: 'Cutoff Adj.', unit: 'hrs', color: 'orange', icon: <I.Clock /> },
 ];
 
 /* ─── Native Date Field ─── */
-function DateField({label,value,readOnly,onChange}){
-  return(
+function DateField({ label, value, readOnly, onChange }) {
+  return (
     <div className="fg">
       <label className="fg-label">{label}</label>
       <div className="native-field-wrap">
-        <span className="native-field-icon"><I.Cal/></span>
-        <input type="date" className="fg-input fg-input-icon" value={value||''} disabled={readOnly} onChange={e=>onChange(e.target.value)}/>
+        <span className="native-field-icon"><I.Cal /></span>
+        <input type="date" className="fg-input fg-input-icon" value={value || ''} disabled={readOnly} onChange={e => onChange(e.target.value)} />
       </div>
     </div>
   );
 }
 
 /* ─── Native Time Field ─── */
-function TimeField({label,value,readOnly,onChange}){
-  return(
+function TimeField({ label, value, readOnly, onChange }) {
+  return (
     <div className="fg">
       <label className="fg-label">{label}</label>
       <div className="native-field-wrap">
-        <span className="native-field-icon"><I.Clock/></span>
-        <input type="time" className="fg-input fg-input-icon" value={toTimeInput(value)} disabled={readOnly} onChange={e=>onChange(fromTimeInput(e.target.value))}/>
+        <span className="native-field-icon"><I.Clock /></span>
+        <input type="time" className="fg-input fg-input-icon" value={toTimeInput(value)} disabled={readOnly} onChange={e => onChange(fromTimeInput(e.target.value))} />
       </div>
     </div>
   );
 }
 
 /* ─── Small Components ─── */
-function Toasts({toasts,dismiss}){
-  return(
+function Toasts({ toasts, dismiss }) {
+  return (
     <div className="toast-stack">
-      {toasts.map(t=>(
+      {toasts.map(t => (
         <div key={t.id} className={`toast toast-${t.type}`}>
-          <span className="toast-icon">{t.type==='success'?<I.Check/>:t.type==='error'?<I.Alert/>:<I.Info/>}</span>
+          <span className="toast-icon">{t.type === 'success' ? <I.Check /> : t.type === 'error' ? <I.Alert /> : <I.Info />}</span>
           <span className="toast-msg">{t.msg}</span>
-          <button className="toast-close" onClick={()=>dismiss(t.id)}><I.X/></button>
+          <button className="toast-close" onClick={() => dismiss(t.id)}><I.X /></button>
         </div>
       ))}
     </div>
   );
 }
-function Btn({label,icon,onClick,variant='ghost',disabled,full,title}){
-  return(
-    <button className={`btn btn-${variant}${full?' btn-full':''}`} onClick={onClick} disabled={disabled} title={title}>
-      {icon&&<span className="btn-icon">{icon}</span>}{label}
+function Btn({ label, icon, onClick, variant = 'ghost', disabled, full, title }) {
+  return (
+    <button className={`btn btn-${variant}${full ? ' btn-full' : ''}`} onClick={onClick} disabled={disabled} title={title}>
+      {icon && <span className="btn-icon">{icon}</span>}{label}
     </button>
   );
 }
-function IconBtn({icon,onClick,title,danger}){
-  return <button className={`icon-btn${danger?' icon-btn-danger':''}`} onClick={onClick} title={title}>{icon}</button>;
+function IconBtn({ icon, onClick, title, danger }) {
+  return <button className={`icon-btn${danger ? ' icon-btn-danger' : ''}`} onClick={onClick} title={title}>{icon}</button>;
 }
-function Badge({val,scheme}){
-  if(!val)return<span className="muted">—</span>;
-  return<span className={`badge badge-${scheme}`}>{val}</span>;
+function Badge({ val, scheme }) {
+  if (!val) return <span className="muted">—</span>;
+  return <span className={`badge badge-${scheme}`}>{val}</span>;
 }
-function Empty({msg}){
-  return(
+function Empty({ msg }) {
+  return (
     <div className="empty">
-      <div className="empty-icon"><I.File/></div>
+      <div className="empty-icon"><I.File /></div>
       <p>{msg}</p>
     </div>
   );
 }
-function LoadingDots(){
-  return(
+function LoadingDots() {
+  return (
     <div className="empty">
-      <div className="loading-dots"><span/><span/><span/></div>
+      <div className="loading-dots"><span /><span /><span /></div>
       <p className="loading-label">Loading data…</p>
     </div>
   );
 }
 
-function SummaryCards({records,cols=9}){
-  const totals=useMemo(()=>({
-    days:records.length,
-    ot:+records.reduce((s,r)=>s+parseNum(r.overtime),0).toFixed(2),
-    late:+records.reduce((s,r)=>s+parseNum(r.lateUndertime),0).toFixed(2),
-    lwop:+records.reduce((s,r)=>s+parseNum(r.lwop),0).toFixed(2),
-    lwp:+records.reduce((s,r)=>s+parseNum(r.lwp),0).toFixed(2),
-    rgot:+records.reduce((s,r)=>s+parseNum(r.rgot),0).toFixed(2),
-    rdot:+records.reduce((s,r)=>s+parseNum(r.rdot),0).toFixed(2),
-    holiday:+records.reduce((s,r)=>s+parseNum(r.paidHoliday),0).toFixed(2),
-    cutoff:+records.reduce((s,r)=>s+parseNum(r.lastCutoffAdjust),0).toFixed(2),
-  }),[records]);
-  return(
+function SummaryCards({ records, cols = 9 }) {
+  const totals = useMemo(() => ({
+    days: records.length,
+    ot: +records.reduce((s, r) => s + parseNum(r.overtime), 0).toFixed(2),
+    late: +records.reduce((s, r) => s + parseNum(r.lateUndertime), 0).toFixed(2),
+    lwop: +records.reduce((s, r) => s + parseNum(r.lwop), 0).toFixed(2),
+    lwp: +records.reduce((s, r) => s + parseNum(r.lwp), 0).toFixed(2),
+    rgot: +records.reduce((s, r) => s + parseNum(r.rgot), 0).toFixed(2),
+    rdot: +records.reduce((s, r) => s + parseNum(r.rdot), 0).toFixed(2),
+    holiday: +records.reduce((s, r) => s + parseNum(r.paidHoliday), 0).toFixed(2),
+    cutoff: +records.reduce((s, r) => s + parseNum(r.lastCutoffAdjust), 0).toFixed(2),
+  }), [records]);
+  return (
     <div className={`summary-grid summary-cols-${cols}`}>
-      {STAT_CARDS.map((c,i)=>(
-        <div key={c.key} className={`summary-card card-${c.color}`} style={{animationDelay:`${i*38}ms`}}>
+      {STAT_CARDS.map((c, i) => (
+        <div key={c.key} className={`summary-card card-${c.color}`} style={{ animationDelay: `${i * 38}ms` }}>
           <span className="card-icon">{c.icon}</span>
-          <span className="card-value">{totals[c.key]}{c.unit&&<span className="card-unit">{c.unit}</span>}</span>
+          <span className="card-value">{totals[c.key]}{c.unit && <span className="card-unit">{c.unit}</span>}</span>
           <span className="card-label">{c.label}</span>
         </div>
       ))}
@@ -394,50 +473,50 @@ function SummaryCards({records,cols=9}){
   );
 }
 
-function RecordTable({records,refreshing,showName,showAll,onView,onEdit,onDelete,onNameClick}){
-  return(
-    <div className={`table-wrap${refreshing?' table-refreshing':''}`}>
+function RecordTable({ records, refreshing, showName, showAll, onView, onEdit, onDelete, onNameClick }) {
+  return (
+    <div className={`table-wrap${refreshing ? ' table-refreshing' : ''}`}>
       <table className="rec-table">
         <thead>
           <tr>
             <th className="col-num">#</th>
-            {showName&&<th>Name</th>}
+            {showName && <th>Name</th>}
             <th>Date</th><th>Day</th><th>Time In</th><th>Time Out</th>
             <th>OT</th><th>Late/UT</th>
-            {showAll&&<><th>LWOP</th><th>LWP</th><th>RGOT</th><th>RDOT</th><th>P.Hol</th><th>Cutoff</th></>}
-            <th>Remarks</th><th className="col-actions"/>
+            {showAll && <><th>LWOP</th><th>LWP</th><th>RGOT</th><th>RDOT</th><th>P.Hol</th><th>Cutoff</th></>}
+            <th>Remarks</th><th className="col-actions" />
           </tr>
         </thead>
         <tbody>
-          {records.map((r,i)=>{
-            const day=getDayOfWeek(r.date);
-            return(
-              <tr key={r.id} className="rec-row" style={{animationDelay:`${Math.min(i*15,260)}ms`}}>
-                <td className="td-num">{i+1}</td>
-                {showName&&(
+          {records.map((r, i) => {
+            const day = getDayOfWeek(r.date);
+            return (
+              <tr key={r.id} className="rec-row" style={{ animationDelay: `${Math.min(i * 15, 260)}ms` }}>
+                <td className="td-num">{i + 1}</td>
+                {showName && (
                   <td className="td-name">
-                    {onNameClick?<button className="name-link" onClick={()=>onNameClick(r.name)}>{r.name||'—'}</button>:<span className="fw-medium">{r.name||'—'}</span>}
+                    {onNameClick ? <button className="name-link" onClick={() => onNameClick(r.name)}>{r.name || '—'}</button> : <span className="fw-medium">{r.name || '—'}</span>}
                   </td>
                 )}
-                <td className={!showName?'td-name':''}>{r.date||'—'}</td>
+                <td className={!showName ? 'td-name' : ''}>{r.date || '—'}</td>
                 <td className={`td-day ${getDayClass(day)}`}>{day}</td>
                 <td>{fmtTime(r.timeIn)}</td>
                 <td>{fmtTime(r.timeOut)}</td>
-                <td><Badge val={r.overtime} scheme="green"/></td>
-                <td><Badge val={r.lateUndertime} scheme="amber"/></td>
-                {showAll&&<>
-                  <td><Badge val={r.lwop} scheme="red"/></td>
-                  <td><Badge val={r.lwp} scheme="slate"/></td>
-                  <td><Badge val={r.rgot} scheme="teal"/></td>
-                  <td><Badge val={r.rdot} scheme="violet"/></td>
-                  <td><Badge val={r.paidHoliday} scheme="sky"/></td>
-                  <td><Badge val={r.lastCutoffAdjust} scheme="orange"/></td>
+                <td><Badge val={r.overtime} scheme="green" /></td>
+                <td><Badge val={r.lateUndertime} scheme="amber" /></td>
+                {showAll && <>
+                  <td><Badge val={r.lwop} scheme="red" /></td>
+                  <td><Badge val={r.lwp} scheme="slate" /></td>
+                  <td><Badge val={r.rgot} scheme="teal" /></td>
+                  <td><Badge val={r.rdot} scheme="violet" /></td>
+                  <td><Badge val={r.paidHoliday} scheme="sky" /></td>
+                  <td><Badge val={r.lastCutoffAdjust} scheme="orange" /></td>
                 </>}
-                <td className="muted td-remarks">{r.remarks||'—'}</td>
+                <td className="muted td-remarks">{r.remarks || '—'}</td>
                 <td><div className="row-actions">
-                  <IconBtn icon={<I.Eye/>} onClick={()=>onView(r)} title="View"/>
-                  <IconBtn icon={<I.Edit/>} onClick={()=>onEdit(r)} title="Edit"/>
-                  <IconBtn icon={<I.Trash/>} onClick={()=>onDelete(r)} title="Delete" danger/>
+                  <IconBtn icon={<I.Eye />} onClick={() => onView(r)} title="View" />
+                  <IconBtn icon={<I.Edit />} onClick={() => onEdit(r)} title="Edit" />
+                  <IconBtn icon={<I.Trash />} onClick={() => onDelete(r)} title="Delete" danger />
                 </div></td>
               </tr>
             );
@@ -448,45 +527,45 @@ function RecordTable({records,refreshing,showName,showAll,onView,onEdit,onDelete
   );
 }
 
-function FileItem({file,active,onSelect,onDelete}){
-  const[hov,setHov]=useState(false);
-  return(
-    <div className={`file-item${active?' active':''}`} onClick={onSelect} onMouseEnter={()=>setHov(true)} onMouseLeave={()=>setHov(false)}>
-      <span className="file-icon"><I.File/></span>
+function FileItem({ file, active, onSelect, onDelete }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div className={`file-item${active ? ' active' : ''}`} onClick={onSelect} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
+      <span className="file-icon"><I.File /></span>
       <span className="file-label">{file.fileName}</span>
       <span className="file-count">{file.totalRecords}</span>
-      <button className="file-del" style={{opacity:hov?1:0}} onClick={onDelete} title="Delete file"><I.X/></button>
+      <button className="file-del" style={{ opacity: hov ? 1 : 0 }} onClick={onDelete} title="Delete file"><I.X /></button>
     </div>
   );
 }
 
-function EmpModal({employee,records,refreshing,fileName,onClose,onView,onEdit,onDelete,onAdd,push}){
-  const name=safeId(employee);
-  const exportRecs=()=>{exportXLSX(toAllRows(records),`${name}_attendance.xlsx`,employee.slice(0,31));push(`Exported ${records.length} records.`,'success');};
-  const exportSum=()=>{const rows=STAT_CARDS.map(c=>{const field=KEY_MAP[c.key];const value=c.key==='days'?records.length:+records.reduce((s,r)=>s+parseNum(r[field]),0).toFixed(2);return{Metric:c.label,Value:value};});exportXLSX(rows,`${name}_summary.xlsx`,'Summary');push('Exported summary.','success');};
-  return(
+function EmpModal({ employee, records, refreshing, fileName, onClose, onView, onEdit, onDelete, onAdd, push }) {
+  const name = safeId(employee);
+  const exportRecs = () => { exportXLSX(toAllRows(records), `${name}_attendance.xlsx`, employee.slice(0, 31)); push(`Exported ${records.length} records.`, 'success'); };
+  const exportSum = () => { const rows = STAT_CARDS.map(c => { const field = KEY_MAP[c.key]; const value = c.key === 'days' ? records.length : +records.reduce((s, r) => s + parseNum(r[field]), 0).toFixed(2); return { Metric: c.label, Value: value }; }); exportXLSX(rows, `${name}_summary.xlsx`, 'Summary'); push('Exported summary.', 'success'); };
+  return (
     <div className="overlay" onClick={onClose}>
-      <div className="emp-modal" onClick={e=>e.stopPropagation()}>
+      <div className="emp-modal" onClick={e => e.stopPropagation()}>
         <div className="emp-modal-head">
           <div className="emp-identity">
             <div className="emp-avatar">{employee.charAt(0).toUpperCase()}</div>
             <div>
               <div className="emp-name">{employee}</div>
-              <div className="emp-sub">{records.length} record{records.length!==1?'s':''} · {fileName}</div>
+              <div className="emp-sub">{records.length} record{records.length !== 1 ? 's' : ''} · {fileName}</div>
             </div>
           </div>
           <div className="emp-head-actions">
-            <Btn icon={<I.Table/>} label="Summary" variant="export" onClick={exportSum}/>
-            <Btn icon={<I.Download/>} label="Records" variant="export" onClick={exportRecs}/>
-            <Btn icon={<I.Plus/>} label="Add Record" variant="primary" onClick={onAdd}/>
-            <IconBtn icon={<I.X/>} onClick={onClose} title="Close"/>
+            <Btn icon={<I.Table />} label="Summary" variant="export" onClick={exportSum} />
+            <Btn icon={<I.Download />} label="Records" variant="export" onClick={exportRecs} />
+            <Btn icon={<I.Plus />} label="Add Record" variant="primary" onClick={onAdd} />
+            <IconBtn icon={<I.X />} onClick={onClose} title="Close" />
           </div>
         </div>
         <div className="emp-modal-body">
-          <SummaryCards records={records} cols={5}/>
+          <SummaryCards records={records} cols={5} />
           <div className="section-block">
             <div className="section-title">Attendance Records</div>
-            {records.length===0?<Empty msg="No records for this employee."/>:<RecordTable records={records} refreshing={refreshing} showName={false} showAll onView={onView} onEdit={onEdit} onDelete={onDelete}/>}
+            {records.length === 0 ? <Empty msg="No records for this employee." /> : <RecordTable records={records} refreshing={refreshing} showName={false} showAll onView={onView} onEdit={onEdit} onDelete={onDelete} />}
           </div>
         </div>
       </div>
@@ -494,52 +573,52 @@ function EmpModal({employee,records,refreshing,fileName,onClose,onView,onEdit,on
   );
 }
 
-function FormModal({mode,formData,onChange,onSave,onClose}){
-  const isView=mode==='view';
-  const set=(k,v)=>onChange({...formData,[k]:v});
-  const inp=(k,ph='')=>(<input type="text" className="fg-input" value={formData[k]} readOnly={isView} placeholder={ph} onChange={e=>set(k,e.target.value)}/>);
-  return(
+function FormModal({ mode, formData, onChange, onSave, onClose }) {
+  const isView = mode === 'view';
+  const set = (k, v) => onChange({ ...formData, [k]: v });
+  const inp = (k, ph = '') => (<input type="text" className="fg-input" value={formData[k]} readOnly={isView} placeholder={ph} onChange={e => set(k, e.target.value)} />);
+  return (
     <div className="overlay" onClick={onClose}>
-      <div className="form-modal" onClick={e=>e.stopPropagation()}>
+      <div className="form-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-head">
-          <h2 className="modal-title">{mode==='add'?'✦ Add Record':mode==='edit'?'✎ Edit Record':'👁️ Record Details'}</h2>
-          <IconBtn icon={<I.X/>} onClick={onClose} title="Close"/>
+          <h2 className="modal-title">{mode === 'add' ? '✦ Add Record' : mode === 'edit' ? '✎ Edit Record' : '👁️ Record Details'}</h2>
+          <IconBtn icon={<I.X />} onClick={onClose} title="Close" />
         </div>
         <div className="modal-body">
           <div className="section-divider">Identity</div>
           <div className="fg fg-span">
             <label className="fg-label">Full Name</label>
-            <input className="fg-input" type="text" value={formData.name} readOnly={isView} placeholder="Employee name" onChange={e=>set('name',e.target.value)}/>
+            <input className="fg-input" type="text" value={formData.name} readOnly={isView} placeholder="Employee name" onChange={e => set('name', e.target.value)} />
           </div>
-          <DateField label="Date" value={formData.date} readOnly={isView} onChange={v=>set('date',v)}/>
+          <DateField label="Date" value={formData.date} readOnly={isView} onChange={v => set('date', v)} />
           <div className="fg">
             <label className="fg-label">Department</label>
-            <select className="fg-input" value={formData.employeeType} disabled={isView} onChange={e=>set('employeeType',e.target.value)}>
-              {DEPT_OPTIONS.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+            <select className="fg-input" value={formData.employeeType} disabled={isView} onChange={e => set('employeeType', e.target.value)}>
+              {DEPT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div className="section-divider">Time</div>
-          <TimeField label="Time In" value={formData.timeIn} readOnly={isView} onChange={v=>set('timeIn',v)}/>
-          <TimeField label="Time Out" value={formData.timeOut} readOnly={isView} onChange={v=>set('timeOut',v)}/>
-          <div className="fg"><label className="fg-label">Overtime (OT)</label>{inp('overtime','0.00')}</div>
-          <div className="fg"><label className="fg-label">Late / Undertime</label>{inp('lateUndertime','0.00')}</div>
-          <div className="fg"/>
+          <TimeField label="Time In" value={formData.timeIn} readOnly={isView} onChange={v => set('timeIn', v)} />
+          <TimeField label="Time Out" value={formData.timeOut} readOnly={isView} onChange={v => set('timeOut', v)} />
+          <div className="fg"><label className="fg-label">Overtime (OT)</label>{inp('overtime', '0.00')}</div>
+          <div className="fg"><label className="fg-label">Late / Undertime</label>{inp('lateUndertime', '0.00')}</div>
+          <div className="fg" />
           <div className="section-divider">Deductions &amp; Adjustments</div>
-          <div className="fg"><label className="fg-label">LWOP</label>{inp('lwop','0')}</div>
-          <div className="fg"><label className="fg-label">LWP</label>{inp('lwp','0')}</div>
-          <div className="fg"><label className="fg-label">RGOT</label>{inp('rgot','0')}</div>
-          <div className="fg"><label className="fg-label">RDOT</label>{inp('rdot','0')}</div>
-          <div className="fg"><label className="fg-label">Paid Holiday</label>{inp('paidHoliday','0')}</div>
-          <div className="fg"><label className="fg-label">Cutoff Adj.</label>{inp('lastCutoffAdjust','0')}</div>
+          <div className="fg"><label className="fg-label">LWOP</label>{inp('lwop', '0')}</div>
+          <div className="fg"><label className="fg-label">LWP</label>{inp('lwp', '0')}</div>
+          <div className="fg"><label className="fg-label">RGOT</label>{inp('rgot', '0')}</div>
+          <div className="fg"><label className="fg-label">RDOT</label>{inp('rdot', '0')}</div>
+          <div className="fg"><label className="fg-label">Paid Holiday</label>{inp('paidHoliday', '0')}</div>
+          <div className="fg"><label className="fg-label">Cutoff Adj.</label>{inp('lastCutoffAdjust', '0')}</div>
           <div className="section-divider">Notes</div>
           <div className="fg fg-span">
             <label className="fg-label">Remarks</label>
-            <textarea className="fg-input fg-textarea" value={formData.remarks} readOnly={isView} rows={3} placeholder="Optional notes…" onChange={e=>set('remarks',e.target.value)}/>
+            <textarea className="fg-input fg-textarea" value={formData.remarks} readOnly={isView} rows={3} placeholder="Optional notes…" onChange={e => set('remarks', e.target.value)} />
           </div>
         </div>
         <div className="modal-foot">
-          <Btn label="Cancel" variant="ghost" onClick={onClose}/>
-          {!isView&&<Btn label="Save Record" variant="primary" onClick={onSave}/>}
+          <Btn label="Cancel" variant="ghost" onClick={onClose} />
+          {!isView && <Btn label="Save Record" variant="primary" onClick={onSave} />}
         </div>
       </div>
     </div>
@@ -547,132 +626,132 @@ function FormModal({mode,formData,onChange,onSave,onClose}){
 }
 
 /* ══════════════════════════════════════ MAIN DASHBOARD ══════════════════════════════════════ */
-export default function AttendanceDashboard(){
-  const[fileInput,setFileInput]=useState(null);
-  const[loading,setLoading]=useState(false);
-  const[refreshing,setRefreshing]=useState(false);
-  const[files,setFiles]=useState([]);
-  const[activeTab,setActiveTab]=useState(null);
-  const[attendance,setAttendance]=useState([]);
-  const[fileName,setFileName]=useState('');
-  const[totalRecords,setTotalRecords]=useState(0);
-  const[search,setSearch]=useState('');
-  const[dept,setDept]=useState('all');
-  const[modal,setModal]=useState(null);
-  const[formData,setFormData]=useState(EMPTY_FORM);
-  const[viewMode,setViewMode]=useState('all');
-  const[empSearch,setEmpSearch]=useState('');
-  const[selEmp,setSelEmp]=useState(null);
-  const[empModal,setEmpModal]=useState(null);
-  const{toasts,push,dismiss}=useToasts();
-  const tabRef=useRef(null);
+export default function AttendanceDashboard() {
+  const [fileInput, setFileInput] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [files, setFiles] = useState([]);
+  const [activeTab, setActiveTab] = useState(null);
+  const [attendance, setAttendance] = useState([]);
+  const [fileName, setFileName] = useState('');
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [search, setSearch] = useState('');
+  const [dept, setDept] = useState('all');
+  const [modal, setModal] = useState(null);
+  const [formData, setFormData] = useState(EMPTY_FORM);
+  const [viewMode, setViewMode] = useState('all');
+  const [empSearch, setEmpSearch] = useState('');
+  const [selEmp, setSelEmp] = useState(null);
+  const [empModal, setEmpModal] = useState(null);
+  const { toasts, push, dismiss } = useToasts();
+  const tabRef = useRef(null);
 
-  useEffect(()=>{loadFiles();},[]);
+  useEffect(() => { loadFiles(); }, []);
 
-  const loadFiles=async()=>{
-    try{
-      const{files:f}=await getAllFiles();
+  const loadFiles = async () => {
+    try {
+      const { files: f } = await getAllFiles();
       setFiles(f);
-      if(f.length>0&&!tabRef.current){tabRef.current=f[0].fileName;setActiveTab(f[0].fileName);await loadAtt(f[0].fileName);}
-      else if(!f.length){tabRef.current=null;setActiveTab(null);setAttendance([]);}
-    }catch(e){console.error(e);}
+      if (f.length > 0 && !tabRef.current) { tabRef.current = f[0].fileName; setActiveTab(f[0].fileName); await loadAtt(f[0].fileName); }
+      else if (!f.length) { tabRef.current = null; setActiveTab(null); setAttendance([]); }
+    } catch (e) { console.error(e); }
   };
 
-  const loadAtt=useCallback(async(file,silent=false)=>{
-    if(!file)return;
-    if(!silent)setRefreshing(true);
-    try{
-      const d=await getAttendanceByFile(file);
-      if(tabRef.current!==file)return;
-      setAttendance(d.attendance);setFileName(d.fileName);setTotalRecords(d.totalRecords);
-    }catch{push('Failed to load attendance.','error');}
-    finally{if(tabRef.current===file)setRefreshing(false);}
-  },[push]);
+  const loadAtt = useCallback(async (file, silent = false) => {
+    if (!file) return;
+    if (!silent) setRefreshing(true);
+    try {
+      const d = await getAttendanceByFile(file);
+      if (tabRef.current !== file) return;
+      setAttendance(d.attendance); setFileName(d.fileName); setTotalRecords(d.totalRecords);
+    } catch { push('Failed to load attendance.', 'error'); }
+    finally { if (tabRef.current === file) setRefreshing(false); }
+  }, [push]);
 
-  const switchTab=useCallback(async name=>{
-    tabRef.current=name;setActiveTab(name);setAttendance([]);setSearch('');setDept('all');setSelEmp(null);setEmpSearch('');setEmpModal(null);await loadAtt(name);
-  },[loadAtt]);
+  const switchTab = useCallback(async name => {
+    tabRef.current = name; setActiveTab(name); setAttendance([]); setSearch(''); setDept('all'); setSelEmp(null); setEmpSearch(''); setEmpModal(null); await loadAtt(name);
+  }, [loadAtt]);
 
-  const handleRefresh=useCallback(async()=>{
-    if(!activeTab||refreshing)return;
-    await loadAtt(activeTab);push('Data refreshed.','success');
-  },[activeTab,refreshing,loadAtt,push]);
+  const handleRefresh = useCallback(async () => {
+    if (!activeTab || refreshing) return;
+    await loadAtt(activeTab); push('Data refreshed.', 'success');
+  }, [activeTab, refreshing, loadAtt, push]);
 
-  useEffect(()=>{
-    if(!activeTab)return;
-    const id=setInterval(()=>loadAtt(activeTab,true),60000);
-    return()=>clearInterval(id);
-  },[activeTab,loadAtt]);
+  useEffect(() => {
+    if (!activeTab) return;
+    const id = setInterval(() => loadAtt(activeTab, true), 60000);
+    return () => clearInterval(id);
+  }, [activeTab, loadAtt]);
 
-  const handleUpload=async()=>{
-    if(!fileInput)return push('Select a file first.','error');
+  const handleUpload = async () => {
+    if (!fileInput) return push('Select a file first.', 'error');
     setLoading(true);
-    try{
-      const d=await uploadFile(fileInput);
-      await loadFiles();tabRef.current=d.fileName;setActiveTab(d.fileName);await loadAtt(d.fileName);
-      push(`"${d.fileName}" uploaded successfully.`,'success');
-    }catch(e){push('Upload failed: '+(e.response?.data?.error||e.message),'error');}
-    finally{setLoading(false);setFileInput(null);}
+    try {
+      const d = await uploadFile(fileInput);
+      await loadFiles(); tabRef.current = d.fileName; setActiveTab(d.fileName); await loadAtt(d.fileName);
+      push(`"${d.fileName}" uploaded successfully.`, 'success');
+    } catch (e) { push('Upload failed: ' + (e.response?.data?.error || e.message), 'error'); }
+    finally { setLoading(false); setFileInput(null); }
   };
 
-  const handleDeleteFile=async(name,e)=>{
+  const handleDeleteFile = async (name, e) => {
     e.stopPropagation();
-    if(!window.confirm(`Delete "${name}"?`))return;
-    try{
-      await deleteFile(name);await loadFiles();
-      if(tabRef.current===name){tabRef.current=null;setActiveTab(null);setAttendance([]);setFileName('');setTotalRecords(0);setSelEmp(null);setEmpModal(null);}
-      push(`"${name}" deleted.`,'info');
-    }catch{push('Error deleting file.','error');}
+    if (!window.confirm(`Delete "${name}"?`)) return;
+    try {
+      await deleteFile(name); await loadFiles();
+      if (tabRef.current === name) { tabRef.current = null; setActiveTab(null); setAttendance([]); setFileName(''); setTotalRecords(0); setSelEmp(null); setEmpModal(null); }
+      push(`"${name}" deleted.`, 'info');
+    } catch { push('Error deleting file.', 'error'); }
   };
 
-  const handleDeleteAll=async()=>{
-    if(!window.confirm('Delete ALL files? This cannot be undone.'))return;
-    try{
-      await deleteAllFiles();tabRef.current=null;setActiveTab(null);setAttendance([]);setFileName('');setTotalRecords(0);setSelEmp(null);setEmpModal(null);await loadFiles();push('All files deleted.','info');
-    }catch{push('Error.','error');}
+  const handleDeleteAll = async () => {
+    if (!window.confirm('Delete ALL files? This cannot be undone.')) return;
+    try {
+      await deleteAllFiles(); tabRef.current = null; setActiveTab(null); setAttendance([]); setFileName(''); setTotalRecords(0); setSelEmp(null); setEmpModal(null); await loadFiles(); push('All files deleted.', 'info');
+    } catch { push('Error.', 'error'); }
   };
 
-  const openModal=(mode,record=null)=>{
-    setModal({mode,record});
+  const openModal = (mode, record = null) => {
+    setModal({ mode, record });
     setFormData(record
-      ?{name:record.name||'',date:record.date||'',timeIn:record.timeIn||'',timeOut:record.timeOut||'',overtime:record.overtime||'',lateUndertime:record.lateUndertime||'',remarks:record.remarks||'',employeeType:record.employeeType||'',paidHoliday:record.paidHoliday||'',lastCutoffAdjust:record.lastCutoffAdjust||'',lwop:record.lwop||'',rgot:record.rgot||'',rdot:record.rdot||'',lwp:record.lwp||''}
-      :{...EMPTY_FORM,date:new Date().toISOString().split('T')[0],name:empModal||selEmp||''});
+      ? { name: record.name || '', date: record.date || '', timeIn: record.timeIn || '', timeOut: record.timeOut || '', overtime: record.overtime || '', lateUndertime: record.lateUndertime || '', remarks: record.remarks || '', employeeType: record.employeeType || '', paidHoliday: record.paidHoliday || '', lastCutoffAdjust: record.lastCutoffAdjust || '', lwop: record.lwop || '', rgot: record.rgot || '', rdot: record.rdot || '', lwp: record.lwp || '' }
+      : { ...EMPTY_FORM, date: new Date().toISOString().split('T')[0], name: empModal || selEmp || '' });
   };
 
-  const handleSave=async()=>{
-    if(!formData.name||!formData.date)return push('Name and Date required.','error');
-    try{
-      if(modal.mode==='add'){await createRecord(activeTab,formData);push('Record added.','success');}
-      else{await updateRecord(activeTab,modal.record.id,formData);push('Record updated.','success');}
-      await loadAtt(activeTab);setModal(null);
-    }catch{push('Error saving.','error');}
+  const handleSave = async () => {
+    if (!formData.name || !formData.date) return push('Name and Date required.', 'error');
+    try {
+      if (modal.mode === 'add') { await createRecord(activeTab, formData); push('Record added.', 'success'); }
+      else { await updateRecord(activeTab, modal.record.id, formData); push('Record updated.', 'success'); }
+      await loadAtt(activeTab); setModal(null);
+    } catch { push('Error saving.', 'error'); }
   };
 
-  const handleDeleteRec=async record=>{
-    if(!window.confirm(`Delete record for ${record.name}?`))return;
-    try{await deleteRecord(activeTab,record.id);await loadAtt(activeTab);push('Record deleted.','info');}
-    catch{push('Error deleting.','error');}
+  const handleDeleteRec = async record => {
+    if (!window.confirm(`Delete record for ${record.name}?`)) return;
+    try { await deleteRecord(activeTab, record.id); await loadAtt(activeTab); push('Record deleted.', 'info'); }
+    catch { push('Error deleting.', 'error'); }
   };
 
-  const uniqueEmps=useMemo(()=>[...new Set(attendance.map(a=>a.name).filter(Boolean))].sort(),[attendance]);
-  const filteredEmps=useMemo(()=>empSearch.trim()?uniqueEmps.filter(n=>n.toLowerCase().includes(empSearch.toLowerCase())):uniqueEmps,[uniqueEmps,empSearch]);
-  const empRecs=useMemo(()=>selEmp?attendance.filter(r=>r.name===selEmp).sort((a,b)=>(a.date||'').localeCompare(b.date||'')):[],[attendance,selEmp]);
-  const empModalRecs=useMemo(()=>empModal?attendance.filter(r=>r.name===empModal).sort((a,b)=>(a.date||'').localeCompare(b.date||'')):[],[attendance,empModal]);
-  const filteredAll=useMemo(()=>attendance.filter(r=>(!search||r.name?.toLowerCase().includes(search.toLowerCase()))&&(dept==='all'||r.employeeType===dept)),[attendance,search,dept]);
+  const uniqueEmps = useMemo(() => [...new Set(attendance.map(a => a.name).filter(Boolean))].sort(), [attendance]);
+  const filteredEmps = useMemo(() => empSearch.trim() ? uniqueEmps.filter(n => n.toLowerCase().includes(empSearch.toLowerCase())) : uniqueEmps, [uniqueEmps, empSearch]);
+  const empRecs = useMemo(() => selEmp ? attendance.filter(r => r.name === selEmp).sort((a, b) => (a.date || '').localeCompare(b.date || '')) : [], [attendance, selEmp]);
+  const empModalRecs = useMemo(() => empModal ? attendance.filter(r => r.name === empModal).sort((a, b) => (a.date || '').localeCompare(b.date || '')) : [], [attendance, empModal]);
+  const filteredAll = useMemo(() => attendance.filter(r => (!search || r.name?.toLowerCase().includes(search.toLowerCase())) && (dept === 'all' || r.employeeType === dept)), [attendance, search, dept]);
 
-  const exportAll=()=>{if(!filteredAll.length)return push('Nothing to export.','error');exportXLSX(toAllRows(filteredAll),`${safeId(fileName||'att')}_all.xlsx`,'All Records');push(`Exported ${filteredAll.length} records.`,'success');};
-  const exportSumAll=()=>{if(!uniqueEmps.length)return push('No data.','error');exportXLSX(toSummaryRows(uniqueEmps,attendance),`${safeId(fileName||'att')}_summary.xlsx`,'Summary');push('Summary exported.','success');};
-  const exportEmp=()=>{if(!empRecs.length)return push('Nothing.','error');exportXLSX(toAllRows(empRecs),`${safeId(selEmp||'emp')}_att.xlsx`,selEmp?.slice(0,31)||'Recs');push(`Exported ${empRecs.length} records.`,'success');};
+  const exportAll = () => { if (!filteredAll.length) return push('Nothing to export.', 'error'); exportXLSX(toAllRows(filteredAll), `${safeId(fileName || 'att')}_all.xlsx`, 'All Records'); push(`Exported ${filteredAll.length} records.`, 'success'); };
+  const exportSumAll = () => { if (!uniqueEmps.length) return push('No data.', 'error'); exportXLSX(toSummaryRows(uniqueEmps, attendance), `${safeId(fileName || 'att')}_summary.xlsx`, 'Summary'); push('Summary exported.', 'success'); };
+  const exportEmp = () => { if (!empRecs.length) return push('Nothing.', 'error'); exportXLSX(toAllRows(empRecs), `${safeId(selEmp || 'emp')}_att.xlsx`, selEmp?.slice(0, 31) || 'Recs'); push(`Exported ${empRecs.length} records.`, 'success'); };
 
-  return(
+  return (
     <>
       <style>{css}</style>
       <div className="app">
-        <Toasts toasts={toasts} dismiss={dismiss}/>
+        <Toasts toasts={toasts} dismiss={dismiss} />
         <aside className="sidebar">
           <div className="logo-block">
             <div className="logo-wrap">
-              <img src={deltaplusLogo} alt="Delta Plus" className="logo-img"/>
+              <img src={deltaplusLogo} alt="Delta Plus" className="logo-img" />
               <div>
                 <span className="logo-text">Attendance</span>
                 <span className="logo-sub">Biometrics Manager</span>
@@ -681,20 +760,20 @@ export default function AttendanceDashboard(){
           </div>
           <nav className="file-nav">
             <span className="nav-label">Files</span>
-            {files.length===0&&<span className="no-files">No files yet</span>}
-            {files.map(f=>(
-              <FileItem key={f.fileName} file={f} active={activeTab===f.fileName}
-                onSelect={()=>switchTab(f.fileName)} onDelete={e=>handleDeleteFile(f.fileName,e)}/>
+            {files.length === 0 && <span className="no-files">No files yet</span>}
+            {files.map(f => (
+              <FileItem key={f.fileName} file={f} active={activeTab === f.fileName}
+                onSelect={() => switchTab(f.fileName)} onDelete={e => handleDeleteFile(f.fileName, e)} />
             ))}
           </nav>
           <div className="sidebar-footer">
             <label className="upload-label">
-              <span className="upload-icon"><I.Upload/></span>
-              <span className="upload-text">{fileInput?fileInput.name:'Upload .xls / .xlsx'}</span>
-              <input type="file" accept=".xls,.xlsx" onChange={e=>setFileInput(e.target.files[0])} hidden/>
+              <span className="upload-icon"><I.Upload /></span>
+              <span className="upload-text">{fileInput ? fileInput.name : 'Upload .xls / .xlsx'}</span>
+              <input type="file" accept=".xls,.xlsx" onChange={e => setFileInput(e.target.files[0])} hidden />
             </label>
-            {fileInput&&<Btn label={loading?'Processing…':'Upload & Process'} variant="primary" onClick={handleUpload} disabled={loading} full icon={loading?<span className="spin"><I.Refresh/></span>:<I.Upload/>}/>}
-            {files.length>0&&<Btn icon={<I.Trash/>} label="Delete all files" variant="danger" onClick={handleDeleteAll} full/>}
+            {fileInput && <Btn label={loading ? 'Processing…' : 'Upload & Process'} variant="primary" onClick={handleUpload} disabled={loading} full icon={loading ? <span className="spin"><I.Refresh /></span> : <I.Upload />} />}
+            {files.length > 0 && <Btn icon={<I.Trash />} label="Delete all files" variant="danger" onClick={handleDeleteAll} full />}
           </div>
         </aside>
 
@@ -702,146 +781,146 @@ export default function AttendanceDashboard(){
           <header className="topbar">
             <div className="breadcrumb">
               <span className="bc-root">Attendance</span>
-              {activeTab&&<><span className="bc-sep"><I.Chevron/></span><span className="bc-current">{fileName}</span>{refreshing&&<span className="refresh-dot"/>}</>}
-              {viewMode==='employee'&&selEmp&&<><span className="bc-sep"><I.Chevron/></span><span className="bc-current bc-emp">{selEmp}</span></>}
+              {activeTab && <><span className="bc-sep"><I.Chevron /></span><span className="bc-current">{fileName}</span>{refreshing && <span className="refresh-dot" />}</>}
+              {viewMode === 'employee' && selEmp && <><span className="bc-sep"><I.Chevron /></span><span className="bc-current bc-emp">{selEmp}</span></>}
             </div>
             <div className="topbar-right">
-              {activeTab&&(
+              {activeTab && (
                 <div className="view-toggle">
-                  {[{id:'all',icon:<I.List/>,label:'All Records'},{id:'employee',icon:<I.Users/>,label:'By Employee'}].map(v=>(
-                    <button key={v.id} className={`vtoggle-btn${viewMode===v.id?' active':''}`}
-                      onClick={()=>{setViewMode(v.id);if(v.id==='all'){setSelEmp(null);setEmpSearch('');}}}>
+                  {[{ id: 'all', icon: <I.List />, label: 'All Records' }, { id: 'employee', icon: <I.Users />, label: 'By Employee' }].map(v => (
+                    <button key={v.id} className={`vtoggle-btn${viewMode === v.id ? ' active' : ''}`}
+                      onClick={() => { setViewMode(v.id); if (v.id === 'all') { setSelEmp(null); setEmpSearch(''); } }}>
                       <span className="vtoggle-icon">{v.icon}</span>{v.label}
                     </button>
                   ))}
                 </div>
               )}
-              {viewMode==='all'&&attendance.length>0&&<>
+              {viewMode === 'all' && attendance.length > 0 && <>
                 <div className="search-wrap">
-                  <span className="search-icon"><I.Search/></span>
-                  <input className="search-input" type="text" placeholder="Search by name…" value={search} onChange={e=>setSearch(e.target.value)}/>
+                  <span className="search-icon"><I.Search /></span>
+                  <input className="search-input" type="text" placeholder="Search by name…" value={search} onChange={e => setSearch(e.target.value)} />
                 </div>
-                <select className="dept-select" value={dept} onChange={e=>setDept(e.target.value)}>
+                <select className="dept-select" value={dept} onChange={e => setDept(e.target.value)}>
                   <option value="all">All departments</option>
-                  {DEPT_OPTIONS.slice(1).map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
+                  {DEPT_OPTIONS.slice(1).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <Btn icon={<I.Table/>} label="Summary" variant="export" onClick={exportSumAll}/>
-                <Btn icon={<I.Download/>} label="Export" variant="export" onClick={exportAll}/>
+                <Btn icon={<I.Table />} label="Summary" variant="export" onClick={exportSumAll} />
+                <Btn icon={<I.Download />} label="Export" variant="export" onClick={exportAll} />
               </>}
-              {viewMode==='employee'&&selEmp&&<Btn icon={<I.Download/>} label="Export" variant="export" onClick={exportEmp}/>}
-              {activeTab&&<>
-                <Btn icon={<span className={refreshing?'spin':''}><I.Refresh/></span>} label={refreshing?'Refreshing…':'Refresh'} variant="ghost" onClick={handleRefresh} disabled={refreshing}/>
-                {(viewMode==='all'||(viewMode==='employee'&&selEmp))&&<Btn icon={<I.Plus/>} label="Add Record" variant="primary" onClick={()=>openModal('add')}/>}
+              {viewMode === 'employee' && selEmp && <Btn icon={<I.Download />} label="Export" variant="export" onClick={exportEmp} />}
+              {activeTab && <>
+                <Btn icon={<span className={refreshing ? 'spin' : ''}><I.Refresh /></span>} label={refreshing ? 'Refreshing…' : 'Refresh'} variant="ghost" onClick={handleRefresh} disabled={refreshing} />
+                {(viewMode === 'all' || (viewMode === 'employee' && selEmp)) && <Btn icon={<I.Plus />} label="Add Record" variant="primary" onClick={() => openModal('add')} />}
               </>}
             </div>
           </header>
 
-          {activeTab&&viewMode==='all'&&(
+          {activeTab && viewMode === 'all' && (
             <div className="stats-bar">
               {[
-                {label:'Total Records',   value:totalRecords,                                color:'blue'},
-                {label:'Employees',       value:uniqueEmps.length,                           color:''},
-                {label:'With Overtime',   value:attendance.filter(r=>r.overtime).length,     color:'green'},
-                {label:'Late / Undertime',value:attendance.filter(r=>r.lateUndertime).length,color:'amber'},
-              ].map((s,i)=>(
-                <div key={s.label} className="stat-card" style={{animationDelay:`${i*65}ms`}}>
+                { label: 'Total Records', value: totalRecords, color: 'blue' },
+                { label: 'Employees', value: uniqueEmps.length, color: '' },
+                { label: 'With Overtime', value: attendance.filter(r => r.overtime).length, color: 'green' },
+                { label: 'Late / Undertime', value: attendance.filter(r => r.lateUndertime).length, color: 'amber' },
+              ].map((s, i) => (
+                <div key={s.label} className="stat-card" style={{ animationDelay: `${i * 65}ms` }}>
                   <span className="stat-label">{s.label}</span>
-                  <span className={`stat-value${s.color?` stat-${s.color}`:''}`}>{s.value}</span>
+                  <span className={`stat-value${s.color ? ` stat-${s.color}` : ''}`}>{s.value}</span>
                 </div>
               ))}
             </div>
           )}
 
           <div className="content">
-            {!activeTab&&(
-              <div className="empty" style={{minHeight:'60vh'}}>
-                <div className="empty-icon" style={{width:56,height:56}}><I.File/></div>
-                <p style={{fontSize:14,fontWeight:600,color:'var(--text-1)'}}>No file selected</p>
+            {!activeTab && (
+              <div className="empty" style={{ minHeight: '60vh' }}>
+                <div className="empty-icon" style={{ width: 56, height: 56 }}><I.File /></div>
+                <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-1)' }}>No file selected</p>
                 <p>Upload a biometrics file or select one from the sidebar.</p>
               </div>
             )}
-            {activeTab&&viewMode==='all'&&(
-              refreshing&&!attendance.length?<LoadingDots/>
-              :!filteredAll.length?<Empty msg="No attendance records found."/>
-              :<RecordTable records={filteredAll} refreshing={refreshing} showName showAll={false}
-                  onView={r=>openModal('view',r)} onEdit={r=>openModal('edit',r)} onDelete={handleDeleteRec}
-                  onNameClick={name=>{setViewMode('employee');setSelEmp(name);setEmpSearch(name);}}/>
+            {activeTab && viewMode === 'all' && (
+              refreshing && !attendance.length ? <LoadingDots />
+                : !filteredAll.length ? <Empty msg="No attendance records found." />
+                  : <RecordTable records={filteredAll} refreshing={refreshing} showName showAll={false}
+                    onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)} onDelete={handleDeleteRec}
+                    onNameClick={name => { setViewMode('employee'); setSelEmp(name); setEmpSearch(name); }} />
             )}
-            {activeTab&&viewMode==='employee'&&(
-              !selEmp?(
+            {activeTab && viewMode === 'employee' && (
+              !selEmp ? (
                 <div className="emp-picker">
                   <div className="picker-header">
                     <div>
-                      <h3 className="picker-title"><span className="picker-icon"><I.Users/></span>Employees</h3>
+                      <h3 className="picker-title"><span className="picker-icon"><I.Users /></span>Employees</h3>
                       <p className="picker-sub">{uniqueEmps.length} employees · {attendance.length} total records</p>
                     </div>
                   </div>
                   <div className="picker-search-wrap">
-                    <span className="picker-search-icon"><I.Search/></span>
-                    <input className="picker-search" type="text" placeholder="Search employee…" value={empSearch} onChange={e=>setEmpSearch(e.target.value)} autoFocus/>
+                    <span className="picker-search-icon"><I.Search /></span>
+                    <input className="picker-search" type="text" placeholder="Search employee…" value={empSearch} onChange={e => setEmpSearch(e.target.value)} autoFocus />
                   </div>
                   <div className="emp-list-header">
-                    <span/><span>Name</span><span className="col-center">Days</span>
+                    <span /><span>Name</span><span className="col-center">Days</span>
                     <span className="col-right">OT</span><span className="col-right">Late</span>
                     <span className="col-right">LWOP</span><span className="col-right">RGOT</span>
-                    <span className="col-right">RDOT</span><span/>
+                    <span className="col-right">RDOT</span><span />
                   </div>
                   <div className="emp-list">
-                    {filteredEmps.length===0&&<div className="emp-list-empty">No results for "{empSearch}"</div>}
-                    {filteredEmps.map((name,idx)=>{
-                      const r=attendance.filter(x=>x.name===name);
-                      const g=k=>+r.reduce((s,x)=>s+parseNum(x[k]),0).toFixed(2);
-                      const ot=g('overtime'),late=g('lateUndertime'),lwop=g('lwop'),rgot=g('rgot'),rdot=g('rdot');
-                      return(
-                        <button key={name} className="emp-list-item" style={{animationDelay:`${idx*12}ms`}} onClick={()=>setEmpModal(name)}>
+                    {filteredEmps.length === 0 && <div className="emp-list-empty">No results for "{empSearch}"</div>}
+                    {filteredEmps.map((name, idx) => {
+                      const r = attendance.filter(x => x.name === name);
+                      const g = k => +r.reduce((s, x) => s + parseNum(x[k]), 0).toFixed(2);
+                      const ot = g('overtime'), late = g('lateUndertime'), lwop = g('lwop'), rgot = g('rgot'), rdot = g('rdot');
+                      return (
+                        <button key={name} className="emp-list-item" style={{ animationDelay: `${idx * 12}ms` }} onClick={() => setEmpModal(name)}>
                           <span className="emp-avatar-sm">{name.charAt(0).toUpperCase()}</span>
                           <span className="emp-list-name">{name}</span>
                           <span className="emp-cell col-center c-muted">{r.length}</span>
-                          <span className={`emp-cell col-right ${ot>0?'c-green':'c-muted'}`}>{ot>0?ot.toFixed(2):'—'}</span>
-                          <span className={`emp-cell col-right ${late>0?'c-amber':'c-muted'}`}>{late>0?late.toFixed(2):'—'}</span>
-                          <span className={`emp-cell col-right ${lwop>0?'c-red':'c-muted'}`}>{lwop>0?lwop.toFixed(2):'—'}</span>
-                          <span className={`emp-cell col-right ${rgot>0?'c-teal':'c-muted'}`}>{rgot>0?rgot.toFixed(2):'—'}</span>
-                          <span className={`emp-cell col-right ${rdot>0?'c-violet':'c-muted'}`}>{rdot>0?rdot.toFixed(2):'—'}</span>
-                          <span className="emp-list-arrow"><I.Chevron/></span>
+                          <span className={`emp-cell col-right ${ot > 0 ? 'c-green' : 'c-muted'}`}>{ot > 0 ? ot.toFixed(2) : '—'}</span>
+                          <span className={`emp-cell col-right ${late > 0 ? 'c-amber' : 'c-muted'}`}>{late > 0 ? late.toFixed(2) : '—'}</span>
+                          <span className={`emp-cell col-right ${lwop > 0 ? 'c-red' : 'c-muted'}`}>{lwop > 0 ? lwop.toFixed(2) : '—'}</span>
+                          <span className={`emp-cell col-right ${rgot > 0 ? 'c-teal' : 'c-muted'}`}>{rgot > 0 ? rgot.toFixed(2) : '—'}</span>
+                          <span className={`emp-cell col-right ${rdot > 0 ? 'c-violet' : 'c-muted'}`}>{rdot > 0 ? rdot.toFixed(2) : '—'}</span>
+                          <span className="emp-list-arrow"><I.Chevron /></span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
-              ):(
+              ) : (
                 <div className="emp-detail">
                   <div className="detail-header">
-                    <Btn icon={<I.Back/>} label="Back" variant="ghost" onClick={()=>{setSelEmp(null);setEmpSearch('');}}/>
+                    <Btn icon={<I.Back />} label="Back" variant="ghost" onClick={() => { setSelEmp(null); setEmpSearch(''); }} />
                     <div className="detail-identity">
                       <div className="emp-avatar-lg">{selEmp.charAt(0).toUpperCase()}</div>
                       <div>
                         <span className="detail-name">{selEmp}</span>
-                        <span className="detail-sub">{empRecs.length} record{empRecs.length!==1?'s':''}</span>
+                        <span className="detail-sub">{empRecs.length} record{empRecs.length !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
                     <div className="detail-actions">
-                      <Btn icon={<I.Download/>} label="Export Excel" variant="export" onClick={exportEmp}/>
-                      <Btn icon={<I.Plus/>} label="Add Record" variant="primary" onClick={()=>openModal('add')}/>
+                      <Btn icon={<I.Download />} label="Export Excel" variant="export" onClick={exportEmp} />
+                      <Btn icon={<I.Plus />} label="Add Record" variant="primary" onClick={() => openModal('add')} />
                     </div>
                   </div>
-                  <SummaryCards records={empRecs}/>
-                  {empRecs.length===0?<Empty msg="No records for this employee."/>
-                    :<RecordTable records={empRecs} refreshing={refreshing} showName={false} showAll
-                        onView={r=>openModal('view',r)} onEdit={r=>openModal('edit',r)} onDelete={handleDeleteRec}/>}
+                  <SummaryCards records={empRecs} />
+                  {empRecs.length === 0 ? <Empty msg="No records for this employee." />
+                    : <RecordTable records={empRecs} refreshing={refreshing} showName={false} showAll
+                      onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)} onDelete={handleDeleteRec} />}
                 </div>
               )
             )}
           </div>
         </main>
 
-        {empModal&&(
+        {empModal && (
           <EmpModal employee={empModal} records={empModalRecs} refreshing={refreshing} fileName={fileName}
-            onClose={()=>setEmpModal(null)} onView={r=>openModal('view',r)} onEdit={r=>openModal('edit',r)}
-            onDelete={handleDeleteRec} onAdd={()=>openModal('add')} push={push}/>
+            onClose={() => setEmpModal(null)} onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)}
+            onDelete={handleDeleteRec} onAdd={() => openModal('add')} push={push} />
         )}
-        {modal&&(
+        {modal && (
           <FormModal mode={modal.mode} formData={formData} onChange={setFormData}
-            onSave={handleSave} onClose={()=>setModal(null)}/>
+            onSave={handleSave} onClose={() => setModal(null)} />
         )}
       </div>
     </>
