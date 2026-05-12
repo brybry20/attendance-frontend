@@ -234,6 +234,8 @@ input[type="date"].fg-input:disabled,input[type="time"].fg-input:disabled{cursor
 @media(max-width:1200px){.summary-cols-9{grid-template-columns:repeat(5,1fr);}}
 @media(max-width:900px){.sidebar{width:190px;min-width:190px;}.stats-bar{grid-template-columns:repeat(2,1fr);}.search-input{width:140px;}.summary-cols-9{grid-template-columns:repeat(3,1fr);}.summary-cols-5{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:640px){.app{flex-direction:column;height:auto;min-height:100vh;}.sidebar{width:100%;min-width:unset;height:auto;border-right:none;border-bottom:1px solid var(--border);}.file-nav{max-height:140px;}.stats-bar{grid-template-columns:repeat(2,1fr);padding:10px;}.topbar{padding:0 12px;gap:5px;flex-wrap:wrap;height:auto;min-height:50px;}.topbar-right{gap:4px;flex-wrap:wrap;}.search-input{width:110px;}.content{padding:12px;}.modal-body{grid-template-columns:1fr 1fr;}.toast-stack{bottom:12px;right:12px;left:12px;}.toast{min-width:unset;max-width:100%;}.summary-cols-9,.summary-cols-5{grid-template-columns:repeat(3,1fr);}.emp-modal{width:100vw;max-height:100vh;border-radius:0;}}
+.inline-edit-input{width:100%;height:28px;padding:0 8px;border:2px solid var(--accent);border-radius:6px;font-size:12px;color:var(--text-1);background:var(--bg-2);outline:none;font-family:'DM Mono',monospace;box-shadow:0 2px 8px var(--accent-glow);z-index:10;position:relative;}
+.col-time{width:120px!important;min-width:120px!important;}
 `;
 
 /* ─── Constants ─── */
@@ -249,6 +251,13 @@ const getDayOfWeek = d => { if (!d) return '—'; return ['Sunday', 'Monday', 'T
 const getDayClass = d => `day-${d.toLowerCase()}`;
 const toTimeInput = s => { if (!s) return ''; const m = s.match(/(\d+):(\d+):\d+\s*(AM|PM)/i); if (!m) return ''; let h = +m[1]; if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12; if (m[3].toUpperCase() === 'AM' && h === 12) h = 0; return `${String(h).padStart(2, '0')}:${m[2]}`; };
 const fromTimeInput = v => { if (!v) return ''; const [h, min] = v.split(':'); let hr = +h; const p = hr >= 12 ? 'PM' : 'AM'; let d = hr % 12 || 12; return `${d}:${String(+min).padStart(2, '0')}:00 ${p}`; };
+const parseTimeParts = s => {
+  if (!s || s === '—') return { h: '12', m: '00', s: '00', p: 'AM' };
+  const m = s.match(/(\d+):(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return { h: '12', m: '00', s: '00', p: 'AM' };
+  return { h: m[1], m: m[2], s: m[3], p: m[4].toUpperCase() };
+};
+const formatTimeParts = (p) => `${p.h}:${p.m.padStart(2,'0')}:${p.s.padStart(2,'0')} ${p.p}`;
 
 /* ─── Toast Hook ─── */
 let _tid = 0;
@@ -493,7 +502,7 @@ function SummaryCards({ records, cols = 9 }) {
   );
 }
 
-function RecordTable({ records, refreshing, showName, showAll, onView, onEdit, onDelete, onNameClick }) {
+function RecordTable({ records, refreshing, showName, showAll, onView, onEdit, onDelete, onNameClick, dateRemarks = {} }) {
   return (
     <div className={`table-wrap${refreshing ? ' table-refreshing' : ''}`}>
       <table className="rec-table">
@@ -532,7 +541,7 @@ function RecordTable({ records, refreshing, showName, showAll, onView, onEdit, o
                   <td><Badge val={r.paidHoliday} scheme="sky" /></td>
                   <td><Badge val={r.lastCutoffAdjust} scheme="orange" /></td>
                 </>}
-                <td className="muted td-remarks">{r.remarks || '—'}</td>
+                <td className="muted td-remarks">{r.remarks || dateRemarks[r.date] || '—'}</td>
                 <td><div className="row-actions">
                   <IconBtn icon={<I.Eye />} onClick={() => onView(r)} title="View" />
                   <IconBtn icon={<I.Edit />} onClick={() => onEdit(r)} title="Edit" />
@@ -559,7 +568,7 @@ function FileItem({ file, active, onSelect, onDelete }) {
   );
 }
 
-function EmpModal({ employee, records, refreshing, fileName, onClose, onView, onEdit, onDelete, onAdd, push }) {
+function EmpModal({ employee, records, refreshing, fileName, onClose, onView, onEdit, onDelete, onAdd, onInlineUpdate, push, dateRemarks }) {
   const name = safeId(employee);
   const exportRecs = () => { exportXLSX(toAllRows(records), `${name}_attendance.xlsx`, employee.slice(0, 31)); push(`Exported ${records.length} records.`, 'success'); };
   const exportSum = () => { const rows = STAT_CARDS.map(c => { const field = KEY_MAP[c.key]; const value = c.key === 'days' ? records.length : +records.reduce((s, r) => s + parseNum(r[field]), 0).toFixed(2); return { Metric: c.label, Value: value }; }); exportXLSX(rows, `${name}_summary.xlsx`, 'Summary'); push('Exported summary.', 'success'); };
@@ -585,7 +594,7 @@ function EmpModal({ employee, records, refreshing, fileName, onClose, onView, on
           <SummaryCards records={records} cols={5} />
           <div className="section-block">
             <div className="section-title">Attendance Records</div>
-            {records.length === 0 ? <Empty msg="No records for this employee." /> : <RecordTable records={records} refreshing={refreshing} showName={false} showAll onView={onView} onEdit={onEdit} onDelete={onDelete} />}
+            {records.length === 0 ? <Empty msg="No records for this employee." /> : <RecordTable records={records} refreshing={refreshing} showName={false} showAll onView={onView} onEdit={onEdit} onDelete={onDelete} onInlineUpdate={onInlineUpdate} dateRemarks={dateRemarks} />}
           </div>
         </div>
       </div>
@@ -596,10 +605,33 @@ function EmpModal({ employee, records, refreshing, fileName, onClose, onView, on
 function FormModal({ mode, formData, onChange, onSave, onClose }) {
   const isView = mode === 'view';
   const set = (k, v) => onChange({ ...formData, [k]: v });
-  const inp = (k, ph = '') => (<input type="text" className="fg-input" value={formData[k]} readOnly={isView} placeholder={ph} onChange={e => set(k, e.target.value)} />);
+  
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !isView) {
+      // Don't save if it's a textarea unless Ctrl+Enter is used, 
+      // but for simple text inputs, Enter should save immediately.
+      if (e.target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        onSave();
+      }
+    }
+  };
+
+  const inp = (k, ph = '') => (
+    <input 
+      type="text" 
+      className="fg-input" 
+      value={formData[k] || ''} 
+      readOnly={isView} 
+      placeholder={ph} 
+      onChange={e => set(k, e.target.value)}
+      onKeyDown={handleKeyDown}
+    />
+  );
+
   return (
     <div className="overlay" onClick={onClose}>
-      <div className="form-modal" onClick={e => e.stopPropagation()}>
+      <div className="form-modal" onClick={e => e.stopPropagation()} onKeyDown={handleKeyDown}>
         <div className="modal-head">
           <h2 className="modal-title">{mode === 'add' ? '✦ Add Record' : mode === 'edit' ? '✎ Edit Record' : '👁️ Record Details'}</h2>
           <IconBtn icon={<I.X />} onClick={onClose} title="Close" />
@@ -608,12 +640,12 @@ function FormModal({ mode, formData, onChange, onSave, onClose }) {
           <div className="section-divider">Identity</div>
           <div className="fg fg-span">
             <label className="fg-label">Full Name</label>
-            <input className="fg-input" type="text" value={formData.name} readOnly={isView} placeholder="Employee name" onChange={e => set('name', e.target.value)} />
+            <input className="fg-input" type="text" value={formData.name || ''} readOnly={isView} placeholder="Employee name" onChange={e => set('name', e.target.value)} autoFocus onKeyDown={handleKeyDown} />
           </div>
           <DateField label="Date" value={formData.date} readOnly={isView} onChange={v => set('date', v)} />
           <div className="fg">
             <label className="fg-label">Department</label>
-            <select className="fg-input" value={formData.employeeType} disabled={isView} onChange={e => set('employeeType', e.target.value)}>
+            <select className="fg-input" value={formData.employeeType || ''} disabled={isView} onChange={e => set('employeeType', e.target.value)} onKeyDown={handleKeyDown}>
               {DEPT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
@@ -633,7 +665,7 @@ function FormModal({ mode, formData, onChange, onSave, onClose }) {
           <div className="section-divider">Notes</div>
           <div className="fg fg-span">
             <label className="fg-label">Remarks</label>
-            <textarea className="fg-input fg-textarea" value={formData.remarks} readOnly={isView} rows={3} placeholder="Optional notes…" onChange={e => set('remarks', e.target.value)} />
+            <textarea className="fg-input fg-textarea" value={formData.remarks || ''} readOnly={isView} rows={3} placeholder="Optional notes…" onChange={e => set('remarks', e.target.value)} />
           </div>
         </div>
         <div className="modal-foot">
@@ -665,7 +697,8 @@ export default function AttendanceDashboard() {
   const [empModal, setEmpModal] = useState(null);
   const { toasts, push, dismiss } = useToasts();
   const tabRef = useRef(null);
-
+  // Keep state for displaying date remarks from backend
+  const [dateRemarks, setDateRemarks] = useState({});
   useEffect(() => { loadFiles(); }, []);
 
   const loadFiles = async () => {
@@ -683,7 +716,15 @@ export default function AttendanceDashboard() {
     try {
       const d = await getAttendanceByFile(file);
       if (tabRef.current !== file) return;
-      setAttendance(d.attendance); setFileName(d.fileName); setTotalRecords(d.totalRecords);
+      const sortedAttendance = (d.attendance || []).slice().sort((a, b) => {
+        const nameA = (a.name || '').toLowerCase();
+        const nameB = (b.name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      });
+      setAttendance(sortedAttendance);
+      setFileName(d.fileName);
+      setTotalRecords(d.totalRecords);
+      setDateRemarks(d.dateRemarks || {});
     } catch { push('Failed to load attendance.', 'error'); }
     finally { if (tabRef.current === file) setRefreshing(false); }
   }, [push]);
@@ -745,6 +786,17 @@ export default function AttendanceDashboard() {
       else { await updateRecord(activeTab, modal.record.id, formData); push('Record updated.', 'success'); }
       await loadAtt(activeTab); setModal(null);
     } catch { push('Error saving.', 'error'); }
+  };
+
+  const handleInlineUpdate = async (id, updates) => {
+    const record = attendance.find(r => r.id === id);
+    if (!record) return;
+    const updatedData = { ...record, ...updates };
+    try {
+      await updateRecord(activeTab, id, updatedData);
+      await loadAtt(activeTab, true);
+      push('Updated successfully.', 'success');
+    } catch { push('Error updating.', 'error'); }
   };
 
   const handleDeleteRec = async record => {
@@ -864,7 +916,8 @@ export default function AttendanceDashboard() {
                 : !filteredAll.length ? <Empty msg="No attendance records found." />
                   : <RecordTable records={filteredAll} refreshing={refreshing} showName showAll={false}
                     onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)} onDelete={handleDeleteRec}
-                    onNameClick={name => { setViewMode('employee'); setSelEmp(name); setEmpSearch(name); }} />
+                    onNameClick={name => { setViewMode('employee'); setSelEmp(name); setEmpSearch(name); }}
+                    onInlineUpdate={handleInlineUpdate} dateRemarks={dateRemarks} />
             )}
             {activeTab && viewMode === 'employee' && (
               !selEmp ? (
@@ -926,7 +979,8 @@ export default function AttendanceDashboard() {
                   <SummaryCards records={empRecs} />
                   {empRecs.length === 0 ? <Empty msg="No records for this employee." />
                     : <RecordTable records={empRecs} refreshing={refreshing} showName={false} showAll
-                      onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)} onDelete={handleDeleteRec} />}
+                      onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)} onDelete={handleDeleteRec}
+                      onInlineUpdate={handleInlineUpdate} dateRemarks={dateRemarks} />}
                 </div>
               )
             )}
@@ -936,7 +990,7 @@ export default function AttendanceDashboard() {
         {empModal && (
           <EmpModal employee={empModal} records={empModalRecs} refreshing={refreshing} fileName={fileName}
             onClose={() => setEmpModal(null)} onView={r => openModal('view', r)} onEdit={r => openModal('edit', r)}
-            onDelete={handleDeleteRec} onAdd={() => openModal('add')} push={push} />
+            onDelete={handleDeleteRec} onAdd={() => openModal('add')} onInlineUpdate={handleInlineUpdate} push={push} dateRemarks={dateRemarks} />
         )}
         {modal && (
           <FormModal mode={modal.mode} formData={formData} onChange={setFormData}

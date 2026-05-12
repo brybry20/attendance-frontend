@@ -52,3 +52,14 @@ export const testConnection = async () => {
   const response = await axios.get(`${API_URL}/test`);
   return response.data;
 };
+
+// New date remark APIs
+export const setDateRemark = async (fileName, date, remark) => {
+  const response = await axios.post(`${API_URL}/files/${encodeURIComponent(fileName)}/date-remark`, { date, remark });
+  return response.data;
+};
+
+export const getDateRemark = async (fileName, date) => {
+  const response = await axios.get(`${API_URL}/files/${encodeURIComponent(fileName)}/date-remark/${encodeURIComponent(date)}`);
+  return response.data;
+};
