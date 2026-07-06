@@ -295,7 +295,7 @@ const toAllRows = (recs) => {
         'Time Out': '',
         Department: '',
         'OT(hrs)': '',
-        'Late/UT(hrs)': '',
+        'Late/UT(mins)': '',
         'LWOP(days)': '',
         'LWP(days)': '',
         'RGOT(hrs)': '',
